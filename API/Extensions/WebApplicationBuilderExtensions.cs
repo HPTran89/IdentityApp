@@ -1,0 +1,73 @@
+﻿using API.Data;
+using API.Models;
+using API.Services.IServices;
+using API.Utility;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
+
+namespace API.Extensions
+{
+    public static class WebApplicationBuilderExtensions
+    {
+        public static WebApplicationBuilder AddApplicationServices(this WebApplicationBuilder builder)
+        {
+
+            builder.Services.AddDbContext<Context>(options =>
+            {
+                options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"));
+            });
+
+            builder.Services.AddScoped<ITokenService, TokenService>();
+            return builder;
+        }
+
+        public static WebApplicationBuilder AddAuthenticationServices(this WebApplicationBuilder builder)
+        {
+            builder.Services.AddIdentity<AppUser, AppRole>(options =>
+            {
+                options.Password.RequiredLength = SD.RequiredPasswordLength;
+                options.SignIn.RequireConfirmedEmail = true;
+                options.SignIn.RequireConfirmedAccount = true;
+                options.Lockout.AllowedForNewUsers = false;
+                options.Lockout.MaxFailedAccessAttempts = SD.MaxFailedAccessAttempts;
+                options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromDays(SD.DefaultLockoutTimeSpan);
+            })
+            .AddEntityFrameworkStores<Context>()
+            .AddDefaultTokenProviders();
+
+            builder.Services.AddAuthentication(opt =>
+            {
+                opt.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+                opt.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+            }).AddCookie(opt =>
+            {
+                opt.Cookie.Name = SD.IdentityAppCookie;
+            }).AddJwtBearer(opt =>
+            {
+                opt.TokenValidationParameters = new Microsoft.IdentityModel.Tokens.TokenValidationParameters
+                {
+                    ValidateIssuerSigningKey = true,
+                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["JWT:Key"])),
+                    ValidateIssuer = true,
+                    ValidIssuer = builder.Configuration["JWT:Issuer"],
+                    ValidateAudience = false,
+                    ValidateLifetime = true,
+                    ClockSkew = TimeSpan.Zero,
+                };
+                opt.Events = new JwtBearerEvents
+                {
+                    OnMessageReceived = context =>
+                    {
+                        context.Token = context.Request.Cookies[SD.IdentityAppCookie];
+                        return Task.CompletedTask;
+                    }
+                };
+            });
+
+            return builder;
+        }
+    }
+}
