@@ -1,4 +1,5 @@
-﻿using API.DTOs.Account;
+﻿using API.DTOs;
+using API.DTOs.Account;
 using API.Extensions;
 using API.Models;
 using API.Services.IServices;
@@ -11,14 +12,11 @@ using Microsoft.EntityFrameworkCore;
 
 namespace API.Controllers
 {
-    [Route("api/[controller]")]
-    [ApiController]
-    public class AccountController(UserManager<AppUser> userManager, SignInManager<AppUser> signInManager, ITokenService tokenService, IConfiguration config) : ControllerBase
+    public class AccountController(UserManager<AppUser> userManager, SignInManager<AppUser> signInManager, ITokenService tokenService) : ApiCoreController
     {
         private readonly UserManager<AppUser> userManager = userManager;
         private readonly SignInManager<AppUser> signInManager = signInManager;
         private readonly ITokenService tokenService = tokenService;
-        private readonly IConfiguration config = config;
 
         [HttpGet("auth-status")]
         public IActionResult IsLoggedIn()
@@ -29,26 +27,28 @@ namespace API.Controllers
         [HttpPost("register")]
         public async Task<IActionResult> Register(RegisterDto registerDto)
         {
-            if(await CheckEmailExsitsAsync(registerDto.Email))
+            if (await CheckEmailExsitsAsync(registerDto.Email))
             {
-                return BadRequest("email taken");
+                return BadRequest(new ApiResponse(401, message: "email taken"));
             }
-            if (await CheckUsernameExsits(registerDto.Username))
+            if (await CheckNameExists(registerDto.Name))
             {
-                return BadRequest("username taken");
+                return BadRequest(new ApiResponse(401, message: "name taken"));
             }
 
             var userToAdd = new AppUser
             {
-                UserName = registerDto.Username,
+                UserName = registerDto.Name.ToLower(),
                 Email = registerDto.Email,
                 EmailConfirmed = true,
+                Name = registerDto.Name,
+                LockoutEnabled = true
                 //Roles = new AppUserRoleBridge { }
             };
 
             var result = await userManager.CreateAsync(userToAdd, registerDto.Password);
             if (!result.Succeeded) { return BadRequest(result.Errors); }
-            return Ok("Your account has been created, you can now login");
+            return Ok(new ApiResponse(401, message: "Your account has been created, you can now login"));
         }
 
         [HttpPost("login")]
@@ -60,15 +60,19 @@ namespace API.Controllers
             if (user == null)
             {
                 // no username or email found
-                return Unauthorized("Invalid username and/or password");
+                return Unauthorized(new ApiResponse(401, message: "Inavlid username and/or password"));
             }
 
-            var result = await signInManager.CheckPasswordSignInAsync(user, loginDto.Password, false);
+            var result = await signInManager.CheckPasswordSignInAsync(user, loginDto.Password, true);
 
-            if(!result.Succeeded)
+            if (!result.Succeeded)
             {
                 RemoveJwtCookie();
-                return Unauthorized("Inavlid username and/or password");
+                if (result.IsLockedOut)
+                {
+                    return Unauthorized(new ApiResponse(401, title: "Account locked", message: SD.AccountLockedMessage(user.LockoutEnd.Value.DateTime), isHtmlEnabled: true, displayByDefault: true));
+                }
+                return Unauthorized(new ApiResponse(401, message: "Inavlid username and/or password"));
             }
 
             return CreateAppUserDto(user);
@@ -88,13 +92,25 @@ namespace API.Controllers
         {
             var user = await userManager.Users.Where(x => x.Id == User.GetUserId()).FirstOrDefaultAsync();
 
-            if(user == null)
+            if (user == null)
             {
                 RemoveJwtCookie();
-                return Unauthorized();
+                return Unauthorized(new ApiResponse(401));
             }
 
             return CreateAppUserDto(user);
+        }
+
+        [HttpGet("name-taken")]
+        public async Task<IActionResult> NameTaken([FromQuery] string name)
+        {
+            return Ok(new { IsTaken = await CheckNameExists(name) });
+        }
+
+        [HttpGet("email-taken")]
+        public async Task<IActionResult> EmailTaken([FromQuery] string name)
+        {
+            return Ok(new { IsTaken = await CheckEmailExsitsAsync(name) });
         }
 
         #region private methods
@@ -102,9 +118,9 @@ namespace API.Controllers
         {
             return await userManager.Users.AnyAsync(x => x.Email == email);
         }
-        private async Task<bool> CheckUsernameExsits(string username)
+        private async Task<bool> CheckNameExists(string name)
         {
-            return await userManager.Users.AnyAsync(x => x.UserName == username);
+            return await userManager.Users.AnyAsync(x => x.UserName == name.ToLower());
         }
         private AppUserDto CreateAppUserDto(AppUser user)
         {
@@ -114,7 +130,7 @@ namespace API.Controllers
 
             return new AppUserDto
             {
-                Username = user.UserName,
+                Name = user.Name,
                 JWT = jwt,
             };
         }
@@ -125,7 +141,7 @@ namespace API.Controllers
                 IsEssential = true,
                 HttpOnly= true,
                 Secure = true,
-                Expires = DateTime.UtcNow.AddDays(int.Parse(config["JWT:ExpiresInDays"])),
+                Expires = DateTime.UtcNow.AddDays(int.Parse(Configuration["JWT:ExpiresInDays"])),
                 SameSite = SameSiteMode.None
             };
 

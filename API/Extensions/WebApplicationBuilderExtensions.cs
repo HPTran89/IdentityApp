@@ -4,9 +4,11 @@ using API.Services.IServices;
 using API.Utility;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
+using API.DTOs;
 
 namespace API.Extensions
 {
@@ -21,6 +23,20 @@ namespace API.Extensions
             });
 
             builder.Services.AddScoped<ITokenService, TokenService>();
+            builder.Services.AddCors();
+            builder.Services.Configure<ApiBehaviorOptions>(options =>
+            {
+                options.InvalidModelStateResponseFactory = actionContext =>
+                {
+                    var errors = actionContext.ModelState
+                        .Where(e => e.Value.Errors.Count > 0)
+                        .SelectMany(s => s.Value.Errors)
+                        .Select(s => s.ErrorMessage).ToArray();
+
+                    var errorResponse = new ApiResponse(400, errors: errors);
+                    return new BadRequestObjectResult(errorResponse);
+                };
+            });
             return builder;
         }
 

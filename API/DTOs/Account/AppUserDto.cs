@@ -2,7 +2,7 @@
 {
     public class AppUserDto
     {
-        public string Username { get; set; }
+        public string Name { get; set; }
         public string JWT { get; set; }
     }
 }

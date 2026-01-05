@@ -5,6 +5,7 @@ namespace API.Models
     public class AppUser : IdentityUser<int>
     {
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public required string Name { get; set; }
         public bool IsActive { get; set; } = true;
 
         // Navigation

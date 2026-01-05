@@ -15,13 +15,31 @@ namespace API.Utility
         public const string UserId = "uid";
         public const string UserName = "username";
         public const string Email = "email";
+        public const string Name = "name";
 
         // Regex
-        public const string UserNameRegex = "^[a-zA-Z0-9_.-]*$";
+        public const string UserNameRegex = "[a-zA-Z][a-zA-Z0-9]*$";
 
         // Application Rules
         public const int RequiredPasswordLength = 6;
         public const int MaxFailedAccessAttempts = 3;
         public const int DefaultLockoutTimeSpan = 1;
+
+        // Default Password for dummy user
+        public const string DefaultPassword = "Pa$$w0rd";
+
+        // locked out message
+        public static string AccountLockedMessage(DateTime endDate)
+        {
+            DateTime startDate = DateTime.UtcNow;
+            TimeSpan difference = endDate - startDate;
+
+            int days = difference.Days;
+            int hours = difference.Hours; 
+            int minutes = difference.Minutes;
+
+            return string.Format("Your account is temporary locked.<br/>You should wait {0} day(s), {1} hour(s), and {2} minute(s)", days, hours, minutes);
+
+        }
     }
 }
