@@ -8,6 +8,7 @@ namespace API.Utility
 {
     public static class SD
     {
+        private static readonly Random _random = new Random();
         // Cookie
         public const  string IdentityAppCookie = "identityappcookie";
 
@@ -28,6 +29,11 @@ namespace API.Utility
         // Default Password for dummy user
         public const string DefaultPassword = "Pa$$w0rd";
 
+        // Naming
+        public const string EC = "ec"; // email confirmation
+        public const string FUP = "fup"; // forgot username/password
+
+
         // locked out message
         public static string AccountLockedMessage(DateTime endDate)
         {
@@ -39,6 +45,14 @@ namespace API.Utility
             int minutes = difference.Minutes;
 
             return string.Format("Your account is temporary locked.<br/>You should wait {0} day(s), {1} hour(s), and {2} minute(s)", days, hours, minutes);
+
+        }
+
+        public static string GenerateRandomString(int length = 6)
+        {
+            const string chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+            return new string(Enumerable.Repeat(chars, length)
+                .Select(s => s[_random.Next(s.Length)]).ToArray());
 
         }
     }

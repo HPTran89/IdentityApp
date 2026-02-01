@@ -10,6 +10,7 @@ namespace API.Models
 
         // Navigation
         public  ICollection<AppUserRoleBridge> Roles { get; set; }
+        public ICollection<AppUserToken> Tokens { get; set; }
 
     }
 }

@@ -13,13 +13,16 @@ namespace API.Data
             
         }
 
+        public DbSet<AppUserToken> AppUserTokens { get; set; }
+
         protected override void OnModelCreating(ModelBuilder builder)
         {
             base.OnModelCreating(builder);
 
             builder.Entity<AppUser>().HasMany(x => x.Roles).WithOne(u => u.User).HasForeignKey(u  => u.UserId).IsRequired();
 
-            builder.Entity<AppRole>().HasMany(x => x.Users).WithOne(u => u.Role).HasForeignKey(u => u.RoleId).IsRequired();
+            builder.Entity<AppRole>().HasMany(x => x.Users).WithOne(u => u.Role).HasForeignKey(u => u.UserId).IsRequired();
+            builder.Entity<AppUser>().HasMany(x => x.Tokens).WithOne(u => u.User).HasForeignKey(u => u.UserId).IsRequired();
         }
     }
 }
