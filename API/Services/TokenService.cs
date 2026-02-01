@@ -1,11 +1,12 @@
 ﻿using API.Models;
+using API.Services.IServices;
 using API.Utility;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 
-namespace API.Services.IServices
+namespace API.Services
 {
     public class TokenService : ITokenService
     {
@@ -15,7 +16,7 @@ namespace API.Services.IServices
         public TokenService(IConfiguration config)
         {
             this.config = config;
-            this.jwtKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(config["JWT:Key"]));
+            jwtKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(config["JWT:Key"]));
         }
         public string CreateJWT(AppUser user)
         {

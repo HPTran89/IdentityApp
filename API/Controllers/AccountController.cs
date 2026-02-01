@@ -1,4 +1,5 @@
-﻿using API.DTOs;
+﻿using API.Data;
+using API.DTOs;
 using API.DTOs.Account;
 using API.Extensions;
 using API.Models;
@@ -12,11 +13,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace API.Controllers
 {
-    public class AccountController(UserManager<AppUser> userManager, SignInManager<AppUser> signInManager, ITokenService tokenService) : ApiCoreController
+    public class AccountController(UserManager<AppUser> userManager, SignInManager<AppUser> signInManager) : ApiCoreController
     {
         private readonly UserManager<AppUser> userManager = userManager;
         private readonly SignInManager<AppUser> signInManager = signInManager;
-        private readonly ITokenService tokenService = tokenService;
 
         [HttpGet("auth-status")]
         public IActionResult IsLoggedIn()
@@ -40,15 +40,28 @@ namespace API.Controllers
             {
                 UserName = registerDto.Name.ToLower(),
                 Email = registerDto.Email,
-                EmailConfirmed = true,
+                EmailConfirmed = false,
                 Name = registerDto.Name,
                 LockoutEnabled = true
-                //Roles = new AppUserRoleBridge { }
             };
 
             var result = await userManager.CreateAsync(userToAdd, registerDto.Password);
             if (!result.Succeeded) { return BadRequest(result.Errors); }
-            return Ok(new ApiResponse(401, message: "Your account has been created, you can now login"));
+
+            try
+            {
+                if (await SendConfirmationEmailAsync(userToAdd))
+                {
+                    return Ok(new ApiResponse(201, title: SM.T_AccountCreated, message: SM.M_AccountCreated));
+                }
+
+                return BadRequest(new ApiResponse(400, title: SM.T_EmailSentFailed, message: SM.M_EmailSentFailed, displayByDefault: true));
+
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new ApiResponse(400, title: SM.T_EmailSentFailed, message: SM.M_EmailSentFailed, displayByDefault: true));
+            }
         }
 
         [HttpPost("login")]
@@ -80,11 +93,174 @@ namespace API.Controllers
 
         [Authorize]
         [HttpPost("logout")]
+
+        [HttpPut("confirm-email")]
+        public async Task<ActionResult<ApiResponse>> ConfirmEmail(ConfirmEmailDto model)
+        {
+            var user = await userManager.FindByEmailAsync(model.Email);
+            if (user == null)
+            {
+                return Unauthorized(new ApiResponse(401, title: SM.T_InvallidToken, message: SM.M_InavlidToken, displayByDefault: true));
+            }
+
+            if (!user.IsActive)
+            {
+                return Unauthorized(new ApiResponse(400, title: SM.M_AccountSuspended, message: SM.M_AccountSuspended, displayByDefault: true));
+            }
+
+            if (user.EmailConfirmed == true)
+            {
+                return BadRequest(new ApiResponse(400, title: SM.T_AccountWasConfirmed, message: SM.M_AccountWasConfirmed, displayByDefault: true));
+            }
+
+            var appUserToken = await context.AppUserTokens.FirstOrDefaultAsync(x => x.UserId == user.Id && x.Name == SD.EC);
+
+            if (appUserToken == null || appUserToken.Expires <= DateTime.UtcNow) {
+
+                if (appUserToken != null)
+                {
+                    // we are removing the token becuase it is expired .
+                    context.AppUserTokens.Remove(appUserToken);
+                    await context.SaveChangesAsync();
+                }
+
+                return Unauthorized(new ApiResponse(401, title: SM.T_InvallidToken, message: SM.M_InavlidToken, displayByDefault: true));
+            }
+
+            context.AppUserTokens.Remove(appUserToken);
+            user.EmailConfirmed = true;
+            await context.SaveChangesAsync();
+
+            return Ok(new ApiResponse(200, title: SM.T_EmailConfirmed, message: SM.M_EmailConfirmed));
+
+        }
+
+        [HttpPost("resend-confirmation-email")]
+        public async Task<ActionResult<ApiResponse>> ResendConfirmationEmail(EmailDto model)
+        {
+            var user = await userManager.FindByEmailAsync(model.Email);
+            if(user == null)
+            {
+                // sending a vague response with a fake delay
+                PauseResponse();
+                return Ok(new ApiResponse(200, title: SM.T_EmailSent, message: SM.M_ConfirmEmailSend));
+            }
+
+            if (!user.IsActive)
+            {
+                return Unauthorized(new ApiResponse(400, title: SM.M_AccountSuspended, message: SM.M_AccountSuspended, displayByDefault: true));
+            }
+            if (user.EmailConfirmed == true)
+            {
+                return BadRequest(new ApiResponse(400, title: SM.T_AccountWasConfirmed, message: SM.M_AccountWasConfirmed, displayByDefault: true));
+            }
+
+            try
+            {
+                if (await SendConfirmationEmailAsync(user))
+                {
+                    return Ok(new ApiResponse(200, title: SM.T_EmailSent, message: SM.M_ConfirmEmailSend));
+                }
+
+                return BadRequest(new ApiResponse(400, title: SM.T_EmailSentFailed, message: SM.M_EmailSentFailed, displayByDefault: true));
+
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new ApiResponse(400, title: SM.T_EmailSentFailed, message: SM.M_EmailSentFailed, displayByDefault: true));
+            }
+        }
+
+        [HttpPost("forgot-username-or-password")]
+        public async Task<ActionResult<ApiResponse>> ForgotUsernameOrPassword(EmailDto email)
+        {
+            var user = await userManager.FindByEmailAsync(email.Email);
+            if (user == null)
+            {
+                // sending a vague response with a fake delay
+                PauseResponse();
+                return Ok(new ApiResponse(200, title: SM.T_EmailSent, message: SM.M_ConfirmEmailSend));
+            }
+
+            if (!user.IsActive)
+            {
+                return Unauthorized(new ApiResponse(401, title: SM.M_AccountSuspended, message: SM.M_AccountSuspended, displayByDefault: true));
+            }
+            if (!user.EmailConfirmed)
+            {
+                return BadRequest(new ApiResponse(400, title: SM.T_ConfirmEmailFirst, message: SM.M_ConfirmEmailFirst, displayByDefault: true));
+            }
+
+            try
+            {
+                if(await SendUsernameOrPasswordEmail(user))
+                {
+                    return Ok(new ApiResponse(200, title: SM.T_EmailSent, message: SM.M_ForgotUsernamePasswordSent));
+                }
+
+                return BadRequest(new ApiResponse(400, title: SM.T_EmailSentFailed, message: SM.M_EmailSentFailed, displayByDefault: true));
+            }
+            catch (Exception)
+            {
+                return BadRequest(new ApiResponse(400, title: SM.T_EmailSentFailed, message: SM.M_EmailSentFailed, displayByDefault: true));
+            }
+        }
+
+        [HttpPut("reset-password")]
+        public async Task<ActionResult<ApiResponse>> ResetPassword(ResetPasswordDto model)
+        {
+            var user = await userManager.FindByEmailAsync(model.Email);
+            if (user == null)
+            {
+                return Unauthorized(new ApiResponse(401, title: SM.T_InvallidToken, message: SM.M_InavlidToken,
+                    displayByDefault: true));
+            }
+
+            if (!user.IsActive)
+            {
+                return Unauthorized(new ApiResponse(401, title: SM.T_AccountSuspended, message: SM.M_AccountSuspended,
+                    displayByDefault: true));
+            }
+
+            if (!user.EmailConfirmed)
+            {
+                return BadRequest(new ApiResponse(400, title: SM.T_ConfirmEmailFirst, message: SM.M_ConfirmEmailFirst,
+                    displayByDefault: true));
+            }
+
+            var appUserToken = await context.AppUserTokens
+                .FirstOrDefaultAsync(x => x.UserId == user.Id && x.Name == SD.FUP && x.Value == model.Token);
+            if (appUserToken == null || appUserToken.Expires <= DateTime.UtcNow)
+            {
+                if (appUserToken != null)
+                {
+                    context.RemoveRange(appUserToken);
+                    await context.SaveChangesAsync();
+                }
+
+                return Unauthorized(new ApiResponse(401, title: SM.T_InvallidToken, message: SM.M_InavlidToken,
+                    displayByDefault: true));
+            }
+
+            context.AppUserTokens.Remove(appUserToken);
+            await userManager.RemovePasswordAsync(user);
+            await userManager.AddPasswordAsync(user, model.NewPassword);
+
+            return Ok(new ApiResponse(200, title: SM.T_PasswordRest, message: SM.M_PasswordRest));
+        }
         public IActionResult Logout()
         {
             RemoveJwtCookie();
             return NoContent();
         }
+
+        //[HttpGet("test-email")]
+        //public async Task<IActionResult> TestEmail()
+        //{
+        //    var email = new EmailSendDto("d", "s", "a");
+        //    await Services.EmailService.SendEmailAsync(email);
+        //    return Ok();
+        //}
 
         [Authorize]
         [HttpGet("refresh-appuser")]
@@ -125,7 +301,7 @@ namespace API.Controllers
         private AppUserDto CreateAppUserDto(AppUser user)
         {
             // creating jwt token using TokenService
-            string jwt = tokenService.CreateJWT(user);
+            string jwt = Services.TokenService.CreateJWT(user);
             SetJwtCookie(jwt);
 
             return new AppUserDto
@@ -150,6 +326,80 @@ namespace API.Controllers
         private void RemoveJwtCookie()
         {
             Response.Cookies.Delete(SD.IdentityAppCookie);
+        }
+
+        private async Task<bool> SendConfirmationEmailAsync(AppUser user)
+        {
+            var userToken = await context.AppUserTokens.Where(x => x.UserId == user.Id && x.Name == SD.EC).FirstOrDefaultAsync();
+
+            var tokenExpiresInMinute = TokenExpiresInMinute();
+
+            if (userToken == null)
+            {
+                var userTokenToAdd = new AppUserToken
+                {
+                    UserId = user.Id,
+                    Name = SD.EC,
+                    Value = SD.GenerateRandomString(),
+                    Expires = DateTime.UtcNow.AddMinutes(tokenExpiresInMinute),
+                    LoginProvider = string.Empty
+                };
+
+                context.AppUserTokens.Add(userTokenToAdd);
+                userToken = userTokenToAdd;
+            }
+            else
+            {
+                userToken.Value = SD.GenerateRandomString();
+                userToken.Expires = DateTime.UtcNow.AddMinutes(tokenExpiresInMinute);
+            }
+            await context.SaveChangesAsync();
+
+            using StreamReader streamReader = System.IO.File.OpenText("EmailTemplates/confirm_email.html");
+            string htmlBody = streamReader.ReadToEnd();
+            string clientUrl = GetClientUrl();
+
+            string messageBody = string.Format(htmlBody, clientUrl, user.Name, user.UserName, user.Email, userToken.Value, tokenExpiresInMinute);
+
+            var emailSend = new EmailSendDto(user.Email, "Verfiy Your Email", messageBody);
+
+            return await Services.EmailService.SendEmailAsync(emailSend);
+        }
+
+        private async Task<bool> SendUsernameOrPasswordEmail(AppUser user)
+        {
+            var userToken = await context.AppUserTokens.FirstOrDefaultAsync(x => x.UserId == user.Id && x.Name == SD.FUP);
+            var tokenExpiresInMinutes = TokenExpiresInMinute();
+
+            if (userToken == null)
+            {
+                var userTokenToAdd = new AppUserToken
+                {
+                    UserId = user.Id,
+                    Name = SD.FUP,
+                    Value = SD.GenerateRandomString(),
+                    Expires = DateTime.UtcNow.AddMinutes(tokenExpiresInMinutes),
+                    LoginProvider = string.Empty
+                };
+                context.AppUserTokens.Add(userTokenToAdd);
+                userToken = userTokenToAdd;
+            }
+            else
+            {
+                userToken.Value = SD.GenerateRandomString();
+                userToken.Expires = DateTime.UtcNow.AddMinutes(tokenExpiresInMinutes);
+            }
+
+            await context.SaveChangesAsync();
+
+            using StreamReader sr = System.IO.File.OpenText("EmailTemplates/forgot_username_password.html");
+            string htmlBody = sr.ReadToEnd();
+
+            string messageBody = string.Format(htmlBody, GetClientUrl(), user.Name, user.UserName, user.Email, userToken.Value, tokenExpiresInMinutes);
+
+            var emailSend = new EmailSendDto(user.Email, "Forgot username or password", messageBody);
+
+            return await Services.EmailService.SendEmailAsync(emailSend);
         }
         #endregion
     }
